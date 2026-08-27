@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .database import Base
+from database import Base
 
 
 def utc_now() -> datetime:
