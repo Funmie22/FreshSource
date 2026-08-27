@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { getBackendHealth } from '../lib/backendApi'
 const flow = [
   { number: '01', title: 'Signal', text: 'A producer posts what is ready.' },
   { number: '02', title: 'Match', text: 'A buyer claims the right quantity.' },
@@ -27,6 +29,13 @@ function WhatsAppMark() {
 function LandingRedesign() {
   const whatsappNumber = import.meta.env.VITE_WHATSAPP_NUMBER || '2348000000000'
   const whatsappUrl = `https://wa.me/${whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent('Hello FreshSource, I need help with fresh produce.')}`
+  const [backendOnline, setBackendOnline] = useState(false)
+
+  useEffect(() => {
+    getBackendHealth()
+      .then((health) => setBackendOnline(health.status === 'ok'))
+      .catch(() => setBackendOnline(false))
+  }, [])
 
   return (
     <main className="min-h-screen overflow-hidden bg-[var(--color-background-warm)]">
@@ -37,7 +46,7 @@ function LandingRedesign() {
           <Link to="/dashboard" className="transition-colors hover:text-[var(--color-primary)]">Farmer desk</Link>
           <Link to="/logistics" className="transition-colors hover:text-[var(--color-primary)]">Carrier routes</Link>
         </nav>
-        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2.5 text-xs font-bold text-[#102A2E] transition-transform hover:-translate-y-0.5"><WhatsAppMark /> WhatsApp us</a>
+        <div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-primary)] sm:flex"><i className={`h-2 w-2 rounded-full ${backendOnline ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-secondary)]'}`} /> {backendOnline ? 'API online' : 'API offline'}</span><a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2.5 text-xs font-bold text-[#102A2E] transition-transform hover:-translate-y-0.5"><WhatsAppMark /> WhatsApp us</a></div>
       </header>
 
       <section className="mx-auto grid max-w-7xl gap-10 px-5 pb-16 pt-8 sm:px-8 md:pt-12 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16 lg:px-12 lg:pb-24">

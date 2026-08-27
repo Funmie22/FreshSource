@@ -40,6 +40,7 @@ class InventoryRead(BaseModel):
     freshness: Optional[str]
     image_url: Optional[str]
     expected_harvest_date: Optional[str]
+    farmer_name: Optional[str] = None
     updated_at: datetime
 
 

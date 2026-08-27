@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useCurrentUser } from '../lib/useCurrentUser'
 import { getRecommended } from '../lib/matching'
 import { isListingExpired } from '../lib/listingHelpers'
+import { backendRequest } from '../lib/backendApi'
 import SupplyMap from '../components/SupplyMap'
 import DirectChat from '../components/DirectChat'
 import Conversations from '../components/Conversations'
@@ -92,23 +93,18 @@ function MarketHub() {
 
   useEffect(() => {
     async function fetchListings() {
-      let query = supabase
-        .from('listings')
-        .select('*, users(name, region, rating)')
-        .order('created_at', { ascending: false })
-
-      if (selectedCrop) query = query.eq('crop_type', selectedCrop)
-      if (selectedLocation) query = query.eq('location', selectedLocation)
-
-      const { data, error } = await query
-
-      if (error) {
-        setError(error.message)
-      } else {
+      try {
+        const apiListings = await backendRequest('/inventory')
+        const data = apiListings.map((listing) => ({
+          ...listing,
+          users: { name: listing.farmer_name || 'FreshSource farmer' },
+        }))
         let filtered = data.filter(
           (listing) =>
             Number(listing.price_per_unit) >= priceRange[0] &&
             Number(listing.price_per_unit) <= priceRange[1] &&
+            (!selectedCrop || listing.crop_type === selectedCrop) &&
+            (!selectedLocation || listing.location === selectedLocation) &&
             !isListingExpired(listing) &&
             listing.quantity > 0
         )
@@ -125,6 +121,19 @@ function MarketHub() {
         }
 
         setListings(filtered)
+        setError(null)
+      } catch (apiError) {
+        let query = supabase
+          .from('listings')
+          .select('*, users(name, region, rating)')
+          .order('created_at', { ascending: false })
+
+        if (selectedCrop) query = query.eq('crop_type', selectedCrop)
+        if (selectedLocation) query = query.eq('location', selectedLocation)
+
+        const { data, error } = await query
+        if (error) setError(apiError.message)
+        else setListings(data.filter((listing) => !isListingExpired(listing) && listing.quantity > 0))
       }
       setLoading(false)
     }

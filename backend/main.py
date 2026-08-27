@@ -12,16 +12,23 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ai_service import ListingExtraction, extract_listing
-from database import create_tables, get_db
-from models import Listing, Order, User, utc_now
-from schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead, WebhookMessage
-from whatsapp_service import send_whatsapp_message, twiml_reply, validate_twilio_signature
+try:
+    from .ai_service import ListingExtraction, extract_listing
+    from .database import create_tables, get_db
+    from .models import Listing, Order, User, utc_now
+    from .schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead, WebhookMessage
+    from .whatsapp_service import send_whatsapp_message, twiml_reply, validate_twilio_signature
+except ImportError:
+    from ai_service import ListingExtraction, extract_listing
+    from database import create_tables, get_db
+    from models import Listing, Order, User, utc_now
+    from schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead, WebhookMessage
+    from whatsapp_service import send_whatsapp_message, twiml_reply, validate_twilio_signature
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("freshsource.api")
 
-ORDER_PATTERN = re.compile(r"^ORDER\s+(?P<item_id>\d+)\s+(?P<quantity>\d+(?:\.\d+)?)$", re.IGNORECASE)
+ORDER_PATTERN = re.compile(r"^ORDER\s+(?P<item_id>[0-9a-f-]{36})\s+(?P<quantity>\d+(?:\.\d+)?)$", re.IGNORECASE)
 MENU_MESSAGE = (
     "Welcome to FreshSource. Reply with:\n"
     "LIST - browse available produce\n"
@@ -127,7 +134,7 @@ def create_order(db: Session, phone: str, item_id: str, quantity: Decimal) -> Or
     user = get_or_create_user(db, phone)
     if user.role is None:
         user.role = "buyer"
-    item = db.get(Listing, int(item_id))
+    item = db.get(Listing, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inventory item not found")
     if item.quantity < quantity:
@@ -153,8 +160,30 @@ def health() -> dict[str, str]:
 
 
 @app.get("/inventory", response_model=list[InventoryRead])
-def list_inventory(db: Session = Depends(get_db)) -> list[Listing]:
-    return list(db.scalars(select(Listing).where(Listing.quantity > 0).order_by(Listing.crop_type)))
+def list_inventory(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    rows = db.execute(
+        select(Listing, User.name.label("farmer_name"))
+        .outerjoin(User, User.id == Listing.farmer_id)
+        .where(Listing.quantity > 0)
+        .order_by(Listing.crop_type)
+    ).all()
+    return [
+        {
+            "id": listing.id,
+            "crop_type": listing.crop_type,
+            "unit": listing.unit,
+            "price_per_unit": listing.price_per_unit,
+            "quantity": listing.quantity,
+            "location": listing.location,
+            "farmer_id": listing.farmer_id,
+            "freshness": listing.freshness,
+            "image_url": listing.image_url,
+            "expected_harvest_date": listing.expected_harvest_date,
+            "farmer_name": farmer_name,
+            "updated_at": listing.updated_at,
+        }
+        for listing, farmer_name in rows
+    ]
 
 
 @app.post("/inventory", response_model=InventoryRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_inventory_key)])
