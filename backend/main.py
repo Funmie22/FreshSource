@@ -1,5 +1,3 @@
-"""FreshSource FastAPI application."""
-
 from contextlib import asynccontextmanager
 from decimal import Decimal
 import logging
@@ -14,11 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .ai_service import ListingExtraction, extract_listing
-from .database import create_tables, get_db
-from .models import Listing, Order, User, utc_now
-from .schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead, WebhookMessage
-from .whatsapp_service import send_whatsapp_message, twiml_reply, validate_twilio_signature
+from ai_service import ListingExtraction, extract_listing
+from database import create_tables, get_db
+from models import Listing, Order, User, utc_now
+from schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead, WebhookMessage
+from whatsapp_service import send_whatsapp_message, twiml_reply, validate_twilio_signature
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("freshsource.api")
@@ -53,7 +51,6 @@ app.add_middleware(
 
 
 def require_inventory_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Protect inventory writes when an API key is configured."""
     expected = os.getenv("INVENTORY_API_KEY")
     if expected and x_api_key != expected:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid inventory API key")
@@ -71,7 +68,6 @@ def get_or_create_user(db: Session, phone: str) -> User:
 
 
 def create_listing(db: Session, phone: str, listing: ListingExtraction) -> Listing:
-    """Persist an extracted farmer listing and associate it with the sender."""
     farmer = get_or_create_user(db, phone)
     farmer.role = "farmer"
     farmer.region = listing.location
@@ -90,14 +86,12 @@ def create_listing(db: Session, phone: str, listing: ListingExtraction) -> Listi
 
 
 def matching_buyers(db: Session, location: str, farmer_phone: str) -> list[User]:
-    """Find buyers whose saved region matches the listing location."""
     buyers = list(db.scalars(select(User).where(User.role == "buyer", User.phone != farmer_phone)))
     location_lower = location.lower()
     return [buyer for buyer in buyers if buyer.region and (buyer.region.lower() in location_lower or location_lower in buyer.region.lower())]
 
 
 def send_buyer_alerts(db: Session, item: Listing, farmer_phone: str) -> int:
-    """Notify matching buyers; Twilio helper uses a mock in local development."""
     buyers = matching_buyers(db, item.location or "", farmer_phone)
     message = f"FreshSource alert: {item.quantity} {item.unit} of {item.crop_type} is available in {item.location} at NGN {item.price_per_unit}/{item.unit}."
     for buyer in buyers:
@@ -133,7 +127,7 @@ def create_order(db: Session, phone: str, item_id: str, quantity: Decimal) -> Or
     user = get_or_create_user(db, phone)
     if user.role is None:
         user.role = "buyer"
-    item = db.get(Listing, item_id)
+    item = db.get(Listing, int(item_id))
     if not item:
         raise HTTPException(status_code=404, detail="Inventory item not found")
     if item.quantity < quantity:
@@ -155,19 +149,16 @@ def create_order(db: Session, phone: str, item_id: str, quantity: Decimal) -> Or
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    """Return a simple liveness response."""
     return {"status": "ok"}
 
 
 @app.get("/inventory", response_model=list[InventoryRead])
 def list_inventory(db: Session = Depends(get_db)) -> list[Listing]:
-    """Return all produce with stock remaining, sorted by name."""
     return list(db.scalars(select(Listing).where(Listing.quantity > 0).order_by(Listing.crop_type)))
 
 
 @app.post("/inventory", response_model=InventoryRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_inventory_key)])
 def upsert_inventory(payload: InventoryUpsert, db: Session = Depends(get_db)) -> Listing:
-    """Create a produce listing or update an existing listing."""
     item = db.get(Listing, payload.item_id) if payload.item_id else None
     if item:
         item.crop_type = payload.crop_type
@@ -187,13 +178,11 @@ def upsert_inventory(payload: InventoryUpsert, db: Session = Depends(get_db)) ->
 
 @app.post("/orders", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
 def create_programmatic_order(payload: OrderCreate, db: Session = Depends(get_db)) -> Order:
-    """Create a pending order from an API client."""
     return create_order(db, payload.phone, payload.item_id, payload.quantity)
 
 
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)) -> Response:
-    """Handle Twilio form webhooks or normalized JSON WhatsApp messages."""
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         message = WebhookMessage.model_validate(await request.json())
@@ -248,5 +237,4 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)) -> R
 
 @app.get("/")
 def root() -> dict[str, Any]:
-    """Describe the service and its primary endpoints."""
     return {"service": "FreshSource API", "docs": "/docs", "webhook": "/webhook"}
