@@ -16,50 +16,21 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, Response
-from sqlalchemy import select
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import update, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-try:
-  from .ai_service import ListingExtraction, extract_listing
-  from .database import SessionLocal, create_tables, get_db
-  from .models import InboundMessage, Listing, Order, User, utc_now
-  from .schemas import (
-      InventoryRead,
-      InventoryUpsert,
-      OrderCreate,
-      OrderRead,
-      WebhookMessage,
-  )
-  from .whatsapp_service import (
-      send_whatsapp_message,
-      twiml_reply,
-      validate_twilio_signature,
-  )
-except ImportError:
-  from ai_service import ListingExtraction, extract_listing
-  from database import SessionLocal, create_tables, get_db
-  from models import InboundMessage, Listing, Order, User, utc_now
-  from schemas import (
-      InventoryRead,
-      InventoryUpsert,
-      OrderCreate,
-      OrderRead,
-      WebhookMessage,
-  )
-  from whatsapp_service import (
-      send_whatsapp_message,
-      twiml_reply,
-      validate_twilio_signature,
-  )
+from .ai_service import ListingExtraction, extract_listing
+from .database import SessionLocal, create_tables, get_db
+from .models import InboundMessage, Listing, Order, User, utc_now
+from .schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead
+from .whatsapp_service import send_whatsapp_message
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("freshsource.api")
 
-VERIFY_TOKEN = os.getenv(
-    "WHATSAPP_VERIFY_TOKEN", "freshsource_secret_token_123"
-)
+VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
 ORDER_PATTERN = re.compile(
     r"^ORDER\s+(?P<item_id>[0-9a-f-]{36})\s+(?P<quantity>\d+(?:\.\d+)?)$",
     re.IGNORECASE,
@@ -109,7 +80,7 @@ def get_or_create_user(db: Session, phone: str) -> User:
   user = db.scalar(select(User).where(User.phone == phone))
   if user:
     return user
-  user = User(phone=phone)
+  user = User(phone=phone, name=f"WhatsApp user {phone[-4:]}")
   db.add(user)
   db.commit()
   db.refresh(user)
@@ -154,12 +125,12 @@ def matching_buyers(db: Session, location: str, farmer_phone: str) -> list[User]
   ]
 
 
-def send_buyer_alerts(db: Session, item: Listing, farmer_phone: str) -> int:
+async def send_buyer_alerts(db: Session, item: Listing, farmer_phone: str) -> int:
   buyers = matching_buyers(db, item.location or "", farmer_phone)
   message = f"FreshSource alert: {item.quantity} {item.unit} of {item.crop_type} is available in {item.location} at NGN {item.price_per_unit}/{item.unit}."
   for buyer in buyers:
     try:
-      send_whatsapp_message(buyer.phone, message)
+      await send_whatsapp_message(buyer.phone, message)
     except Exception:
       logger.exception("Failed to alert buyer %s", buyer.id)
   return len(buyers)
@@ -204,12 +175,18 @@ def create_order(
   item = db.get(Listing, item_id)
   if not item:
     raise HTTPException(status_code=404, detail="Inventory item not found")
-  if item.quantity < quantity:
-    raise HTTPException(
-        status_code=409, detail=f"Only {item.quantity}{item.unit} is available"
-    )
+  stock_update = db.execute(
+      update(Listing)
+      .where(Listing.id == item_id, Listing.quantity >= quantity)
+      .values(quantity=Listing.quantity - quantity, updated_at=utc_now())
+  )
+  if stock_update.rowcount != 1:
+    db.rollback()
+    available = db.scalar(select(Listing.quantity).where(Listing.id == item_id))
+    if available is None:
+      raise HTTPException(status_code=404, detail="Inventory item not found")
+    raise HTTPException(status_code=409, detail=f"Only {available}{item.unit} is available")
 
-  item.quantity -= quantity
   order = Order(
       listing_id=item.id,
       buyer_id=user.id,
@@ -268,7 +245,7 @@ async def process_inbound_message_background(
         extracted = await extract_listing(command)
         if extracted:
           item = create_listing(db, phone, extracted)
-          buyer_count = send_buyer_alerts(db, item, phone)
+          buyer_count = await send_buyer_alerts(db, item, phone)
           reply = (
               f"Your listing is live: {item.quantity} {item.unit} of"
               f" {item.crop_type} in {item.location} at NGN"
@@ -278,7 +255,7 @@ async def process_inbound_message_background(
         else:
           reply = f"{LISTING_HELP}\n\n{MENU_MESSAGE}"
 
-    send_whatsapp_message(phone, reply)
+    await send_whatsapp_message(phone, reply)
 
     msg = db.get(InboundMessage, message_sid)
     if msg:
@@ -286,7 +263,7 @@ async def process_inbound_message_background(
       db.commit()
   except HTTPException as exc:
     db.rollback()
-    send_whatsapp_message(
+    await send_whatsapp_message(
         phone, f"Unable to complete that request: {exc.detail}"
     )
     msg = db.get(InboundMessage, message_sid)
@@ -296,7 +273,7 @@ async def process_inbound_message_background(
   except (IntegrityError, ValueError) as exc:
     db.rollback()
     logger.warning("Webhook command processing failed: %s", exc)
-    send_whatsapp_message(
+    await send_whatsapp_message(
         phone,
         "That order could not be processed. Check the item ID and quantity,"
         " then try again.",
@@ -312,7 +289,7 @@ async def process_inbound_message_background(
         message_sid,
         exc,
     )
-    send_whatsapp_message(
+    await send_whatsapp_message(
         phone,
         "Sorry, an unexpected error occurred while processing your request.",
     )
@@ -411,63 +388,32 @@ async def whatsapp_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-) -> Response:
-  content_type = request.headers.get("content-type", "")
-  message_sid = None
+) -> JSONResponse:
+  data = await request.json()
+  value = data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
+  messages = value.get("messages") or []
+  if not messages:
+    return JSONResponse(content={"status": "acknowledged"}, status_code=200)
 
-  if "application/json" in content_type:
-    data = await request.json()
-    message = WebhookMessage.model_validate(data)
-    message_sid = (
-        data.get("MessageSid")
-        or data.get("message_sid")
-        or f"json_{utc_now().timestamp()}"
-    )
-  else:
-    form = await request.form()
-    signature = request.headers.get("X-Twilio-Signature")
-    form_params = {str(key): str(value) for key, value in form.items()}
-    if not validate_twilio_signature(
-        str(request.url), form_params, signature
-    ):
-      raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail="Invalid Twilio signature",
-      )
+  msg_data = messages[0]
+  message_sid = str(msg_data.get("id", "")).strip()
+  phone = str(msg_data.get("from", "")).strip()
+  command = str(msg_data.get("text", {}).get("body", "")).strip()
+  if not message_sid or not phone or not command:
+    return JSONResponse(content={"status": "acknowledged"}, status_code=200)
 
-    sender = str(form.get("From") or form.get("from") or "")
-    body = str(form.get("Body") or form.get("body") or "")
-    message_sid = str(form.get("MessageSid") or form.get("messagesid") or "")
+  if db.get(InboundMessage, message_sid):
+    return JSONResponse(content={"status": "received"}, status_code=200)
 
-    if not sender or not body:
-      raise HTTPException(
-          status_code=400, detail="Webhook requires sender and body"
-      )
-    message = WebhookMessage(sender=sender, body=body)
+  try:
+    db.add(InboundMessage(id=message_sid, sender=phone, body=command, status="queued"))
+    db.commit()
+  except IntegrityError:
+    db.rollback()
+    return JSONResponse(content={"status": "received"}, status_code=200)
 
-  phone = message.sender.strip()
-  command = message.body.strip()
-
-  if message_sid:
-    existing = db.get(InboundMessage, message_sid)
-    if existing:
-      return Response(content=twiml_reply(""), media_type="application/xml")
-
-    inbound = InboundMessage(
-        id=message_sid, sender=phone, body=command, status="queued"
-    )
-    try:
-      db.add(inbound)
-      db.commit()
-    except IntegrityError:
-      db.rollback()
-      return Response(content=twiml_reply(""), media_type="application/xml")
-
-  background_tasks.add_task(
-      process_inbound_message_background, message_sid or "", phone, command
-  )
-
-  return Response(content=twiml_reply(""), media_type="application/xml")
+  background_tasks.add_task(process_inbound_message_background, message_sid, phone, command)
+  return JSONResponse(content={"status": "received"}, status_code=200)
 
 
 @app.get("/")
