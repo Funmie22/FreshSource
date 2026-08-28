@@ -71,3 +71,13 @@ class Order(Base):
 
     buyer: Mapped[User] = relationship(back_populates="orders")
     listing: Mapped[Listing] = relationship(back_populates="orders")
+
+
+class InboundMessage(Base):
+    __tablename__ = "inbound_messages"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    sender: Mapped[str] = mapped_column(String(64))
+    body: Mapped[str] = mapped_column(String(4000))
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

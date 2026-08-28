@@ -586,7 +586,6 @@ async def whatsapp_webhook(
     # 2. Add long-running parsing/DB work to FastAPI Background Tasks
     background_tasks.add_task(process_inbound_message_background, message_sid or "", phone, command)
 
-    # 3. Respond immediately to Twilio (HTTP 200 with empty/acknowledged TwiML)
     return Response(content=twiml_reply(""), media_type="application/xml")
 
 

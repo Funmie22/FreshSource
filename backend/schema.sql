@@ -75,6 +75,14 @@ create table if not exists public.orders (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.inbound_messages (
+  id text primary key,
+  sender text not null,
+  body text not null,
+  status text not null default 'queued',
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.order_status_events (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.orders(id) on delete cascade,

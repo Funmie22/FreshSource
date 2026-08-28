@@ -76,6 +76,14 @@ create table if not exists public.orders (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.inbound_messages (
+  id text primary key,
+  sender text not null,
+  body text not null,
+  status text not null default 'queued',
+  created_at timestamptz not null default now()
+);
+
 -- Add columns introduced after the first orders table was deployed.
 alter table public.orders add column if not exists transporter_id uuid references public.users(id) on delete set null;
 alter table public.orders add column if not exists payment_status text not null default 'pending';
