@@ -27,7 +27,9 @@ function RolePicker() {
     const { error } = await supabase
       .from('users')
       .update({ role: roleId })
-      .eq('auth_id', user.auth_id)
+      .eq('id', user.id)
+      .select('id, role')
+      .single()
 
     if (error) {
       setUpdating(false)
