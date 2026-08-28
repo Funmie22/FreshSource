@@ -168,9 +168,33 @@ function Auth() {
 
     const { data: userData } = await supabase
       .from('users')
-      .select('role')
+      .select('*')
       .eq('auth_id', data.user.id)
       .maybeSingle()
+
+    let profile = userData
+    if (!profile) {
+      const fallbackName = data.user.user_metadata?.full_name
+        || data.user.user_metadata?.name
+        || data.user.email?.split('@')[0]
+        || 'FreshSource user'
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          auth_id: data.user.id,
+          role: null,
+          name: fallbackName,
+          phone: null,
+        })
+
+      if (profileError) {
+        notify.error('Unable to load your account profile')
+        setError(`Your login succeeded, but your account profile could not be created: ${profileError.message}`)
+        setSubmitting(false)
+        return
+      }
+      profile = { role: null }
+    }
 
     const roleRoutes = {
       farmer: '/dashboard',
@@ -182,8 +206,8 @@ function Auth() {
     setSuccess('Logged in successfully! Redirecting...')
 
     setTimeout(() => {
-      if (userData?.role && roleRoutes[userData.role]) {
-        navigate(roleRoutes[userData.role])
+      if (profile?.role && roleRoutes[profile.role]) {
+        navigate(roleRoutes[profile.role])
       } else {
         navigate('/role-switch')
       }

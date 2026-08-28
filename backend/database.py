@@ -21,7 +21,10 @@ class Base(DeclarativeBase):
 
 def create_tables() -> None:
     """Create database tables when the service starts."""
-    from . import models  # noqa: F401
+    try:
+        from . import models  # noqa: F401
+    except ImportError:
+        import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 
