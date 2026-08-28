@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { supabase } from '../lib/supabaseClient'
 import { useCurrentUser } from '../lib/useCurrentUser'
@@ -19,7 +19,7 @@ function RolePicker() {
   const [updating, setUpdating] = useState(false)
 
   if (loading) return <div className="p-10 text-center">Loading...</div>
-  if (!user) return navigate('/auth')
+  if (!user) return <Navigate to="/auth" replace />
 
   const handleSelectRole = async (roleId) => {
     setUpdating(true)

@@ -25,16 +25,21 @@ function ProtectedRoute({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // 1. Fetch initial session state
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let authEventReceived = false
+
+    // Subscribe before reading the session so a login event cannot be overwritten
+    // by a slower initial session lookup.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      authEventReceived = true
       setSession(session)
       setLoading(false)
     })
 
-    // 2. Listen for auth changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setLoading(false)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!authEventReceived) {
+        setSession(session)
+        setLoading(false)
+      }
     })
 
     return () => subscription.unsubscribe()
