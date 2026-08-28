@@ -19,6 +19,10 @@ create table if not exists public.users (
   updated_at timestamptz not null default now()
 );
 
+alter table public.users drop constraint if exists users_role_check;
+alter table public.users add constraint users_role_check
+  check (role is null or role in ('farmer', 'buyer', 'transporter'));
+
 create table if not exists public.farmers (
   user_id uuid primary key references public.users(id) on delete cascade,
   farm_name text,
@@ -305,3 +309,158 @@ create policy orders_buyer_read on public.orders for select using (
   transporter_id = public.current_user_id() or
   listing_id in (select id from public.listings where farmer_id = public.current_user_id())
 );
+--------------------------------------------------------------------------------
+-- COMPLETE ROW LEVEL SECURITY (RLS) POLICIES
+--------------------------------------------------------------------------------
+
+-- =============================================================================
+-- 1. FARMERS, BUYERS, TRANSPORTERS (Profile Tables)
+-- =============================================================================
+
+-- Farmers
+drop policy if exists farmers_select_public on public.farmers;
+create policy farmers_select_public on public.farmers 
+  for select using (true);
+
+drop policy if exists farmers_manage_own on public.farmers;
+create policy farmers_manage_own on public.farmers 
+  for all using (user_id = public.current_user_id()) 
+  with check (user_id = public.current_user_id());
+
+-- Buyers
+drop policy if exists buyers_select_public on public.buyers;
+create policy buyers_select_public on public.buyers 
+  for select using (true);
+
+drop policy if exists buyers_manage_own on public.buyers;
+create policy buyers_manage_own on public.buyers 
+  for all using (user_id = public.current_user_id()) 
+  with check (user_id = public.current_user_id());
+
+-- Transporters
+drop policy if exists transporters_select_public on public.transporters;
+create policy transporters_select_public on public.transporters 
+  for select using (true);
+
+drop policy if exists transporters_manage_own on public.transporters;
+create policy transporters_manage_own on public.transporters 
+  for all using (user_id = public.current_user_id()) 
+  with check (user_id = public.current_user_id());
+
+
+-- =============================================================================
+-- 2. ORDERS (Full CRUD Operations)
+-- =============================================================================
+
+-- Buyer placement (Insert)
+drop policy if exists orders_buyer_insert on public.orders;
+create policy orders_buyer_insert on public.orders 
+  for insert with check (buyer_id = public.current_user_id());
+
+-- Participant updates (Update: Buyer, Transporter, or Listing's Farmer)
+drop policy if exists orders_participants_update on public.orders;
+create policy orders_participants_update on public.orders 
+  for update using (
+    buyer_id = public.current_user_id() or
+    transporter_id = public.current_user_id() or
+    exists (
+      select 1 from public.listings l 
+      where l.id = orders.listing_id 
+        and l.farmer_id = public.current_user_id()
+    )
+  )
+  with check (
+    buyer_id = public.current_user_id() or
+    transporter_id = public.current_user_id() or
+    exists (
+      select 1 from public.listings l 
+      where l.id = orders.listing_id 
+        and l.farmer_id = public.current_user_id()
+    )
+  );
+
+
+-- =============================================================================
+-- 3. TRANSPORT REQUESTS & ORDER EVENTS
+-- =============================================================================
+
+-- Transport Requests
+drop policy if exists transport_requests_participant_all on public.transport_requests;
+create policy transport_requests_participant_all on public.transport_requests 
+  for all using (
+    farmer_id = public.current_user_id() or
+    requested_transporter_id = public.current_user_id() or
+    exists (
+      select 1 from public.orders o 
+      where o.id = transport_requests.order_id 
+        and (o.buyer_id = public.current_user_id() or o.transporter_id = public.current_user_id())
+    )
+  );
+
+-- Order Status Audit Events
+drop policy if exists order_status_events_select on public.order_status_events;
+create policy order_status_events_select on public.order_status_events 
+  for select using (
+    exists (
+      select 1 from public.orders o 
+      where o.id = order_status_events.order_id 
+        and (
+          o.buyer_id = public.current_user_id() or 
+          o.transporter_id = public.current_user_id() or
+          exists (select 1 from public.listings l where l.id = o.listing_id and l.farmer_id = public.current_user_id())
+        )
+    )
+  );
+
+drop policy if exists order_status_events_insert on public.order_status_events;
+create policy order_status_events_insert on public.order_status_events 
+  for insert with check (changed_by = public.current_user_id());
+
+
+-- =============================================================================
+-- 4. MESSAGES & REVIEWS
+-- =============================================================================
+
+-- Direct Messages
+drop policy if exists messages_participants_select on public.messages;
+create policy messages_participants_select on public.messages 
+  for select using (
+    sender_id = public.current_user_id() or 
+    receiver_id = public.current_user_id()
+  );
+
+drop policy if exists messages_sender_insert on public.messages;
+create policy messages_sender_insert on public.messages 
+  for insert with check (sender_id = public.current_user_id());
+
+drop policy if exists messages_receiver_update on public.messages;
+create policy messages_receiver_update on public.messages 
+  for update using (receiver_id = public.current_user_id());
+
+-- Reviews
+drop policy if exists reviews_select_public on public.reviews;
+create policy reviews_select_public on public.reviews 
+  for select using (true);
+
+drop policy if exists reviews_reviewer_insert on public.reviews;
+create policy reviews_reviewer_insert on public.reviews 
+  for insert with check (reviewer_id = public.current_user_id());
+
+
+-- =============================================================================
+-- 5. NOTIFICATIONS & INTEGRATION LOGS
+-- =============================================================================
+
+-- Buyer Alerts
+drop policy if exists buyer_alerts_own on public.buyer_alerts;
+create policy buyer_alerts_own on public.buyer_alerts 
+  for all using (buyer_id = public.current_user_id());
+
+-- WhatsApp Conversations
+drop policy if exists whatsapp_conversations_own on public.whatsapp_conversations;
+create policy whatsapp_conversations_own on public.whatsapp_conversations 
+  for select using (user_id = public.current_user_id());
+
+-- Note: ai_extraction_logs, inbound_messages, and audit_records are intentionally 
+-- restricted from direct client access. They execute using Supabase service_role keys 
+-- or security definer database triggers.

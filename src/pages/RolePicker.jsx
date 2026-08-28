@@ -31,7 +31,7 @@ function RolePicker() {
 
     if (error) {
       setUpdating(false)
-      notify.error('Failed to update role')
+      notify.error(`Failed to update role: ${error.message}`)
       return
     }
 
