@@ -416,6 +416,6 @@ async def whatsapp_webhook(
   return JSONResponse(content={"status": "received"}, status_code=200)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root() -> dict[str, Any]:
   return {"service": "FreshSource API", "docs": "/docs", "webhook": "/webhook"}
