@@ -24,12 +24,11 @@ function RolePicker() {
   const handleSelectRole = async (roleId) => {
     setUpdating(true)
 
+    // Updated: Removed .select('id, role').single() to avoid RETURNING clause trigger checks
     const { error } = await supabase
       .from('users')
       .update({ role: roleId })
       .eq('id', user.id)
-      .select('id, role')
-      .single()
 
     if (error) {
       setUpdating(false)
