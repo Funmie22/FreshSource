@@ -188,10 +188,27 @@ begin
   end loop;
 end $$;
 
+create or replace function public.current_user_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.users where auth_id = auth.uid() limit 1;
+$$;
+
 create or replace function public.record_audit() returns trigger language plpgsql security definer set search_path = public as $$
 begin
   insert into public.audit_records(actor_id, action, table_name, record_id, old_data, new_data)
-  values (auth.uid(), tg_op, tg_table_name, coalesce(new.id::text, old.id::text), to_jsonb(old), to_jsonb(new));
+  values (
+    public.current_user_id(),
+    tg_op,
+    tg_table_name,
+    coalesce(new.id::text, old.id::text),
+    to_jsonb(old),
+    to_jsonb(new)
+  );
   return coalesce(new, old);
 end;
 $$;
