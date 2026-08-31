@@ -1,8 +1,8 @@
 import logging
 from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import InboundMessage
-from whatsapp_service import send_whatsapp_message
+from backend.database import SessionLocal
+from backend.models import InboundMessage
+from backend.whatsapp_service import send_whatsapp_message
 
 logger = logging.getLogger(__name__)
 

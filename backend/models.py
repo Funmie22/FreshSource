@@ -77,7 +77,10 @@ class InboundMessage(Base):
     __tablename__ = "inbound_messages"
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    sender: Mapped[str] = mapped_column(String(64))
+    sender: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[str] = mapped_column(String(4096), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     body: Mapped[str] = mapped_column(String(4000))
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

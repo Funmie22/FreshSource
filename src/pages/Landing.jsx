@@ -131,7 +131,7 @@ export default function Landing() {
       <section
         className="relative h-[500px] md:h-[600px] flex items-center justify-center overflow-hidden"
         style={{
-          backgroundImage: 'url(/images/hero-nigeria-farming.jpg)',
+          backgroundImage: 'url(/images/FreshSource.jpeg)',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}

@@ -21,11 +21,11 @@ from sqlalchemy import update, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ai_service import ListingExtraction, extract_listing
-from database import SessionLocal, create_tables, get_db
-from models import InboundMessage, Listing, Order, User, utc_now
-from schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead
-from whatsapp_service import send_whatsapp_message
+from backend.ai_service import ListingExtraction, extract_listing
+from backend.database import SessionLocal, create_tables, get_db
+from backend.models import InboundMessage, Listing, Order, User, utc_now
+from backend.schemas import InventoryRead, InventoryUpsert, OrderCreate, OrderRead
+from backend.whatsapp_service import send_whatsapp_message
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("freshsource.api")

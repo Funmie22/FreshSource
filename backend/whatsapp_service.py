@@ -91,7 +91,7 @@ logger = logging.getLogger(__name__)
 
 async def send_whatsapp_message(to_phone: str, message_body: str) -> dict[str, Any]:
     """Send a text message through Meta's WhatsApp Cloud API."""
-    token = os.getenv("WHATSAPP_TOKEN")
+    token = os.getenv("WHATSAPP_TOKEN") or os.getenv("WHATSAPP_ACCESS_TOKEN")
     phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
     if not token or not phone_number_id:
         logger.info("Mock WhatsApp message to %s: %s", to_phone, message_body)

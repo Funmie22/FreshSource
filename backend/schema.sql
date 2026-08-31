@@ -15,6 +15,11 @@ create table if not exists public.users (
   updated_at timestamptz not null default now()
 );
 
+alter table public.users add column if not exists updated_at timestamptz;
+update public.users set updated_at = now() where updated_at is null;
+alter table public.users alter column updated_at set default now();
+alter table public.users alter column updated_at set not null;
+
 do $$
 declare constraint_name text;
 begin
